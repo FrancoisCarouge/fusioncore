@@ -260,6 +260,11 @@ struct UKFParams {
 
 class UKF {
 public:
+  // The 2n+1 sigma points and their weights: n is STATE_DIM, known at compile time
+  static constexpr int kSigmaPoints = 2 * STATE_DIM + 1;
+  using SigmaMatrix = Eigen::Matrix<double, STATE_DIM, kSigmaPoints>;
+  using SigmaWeights = Eigen::Matrix<double, kSigmaPoints, 1>;
+
   explicit UKF(const UKFParams& params = UKFParams{});
 
   // Initialize state
@@ -412,8 +417,8 @@ private:
   // UKF weights
   int n_aug_;          // augmented state dimension
   double lambda_;      // scaling parameter
-  Eigen::VectorXd Wm_; // weights for mean
-  Eigen::VectorXd Wc_; // weights for covariance
+  SigmaWeights Wm_; // weights for mean
+  SigmaWeights Wc_; // weights for covariance
 
   // Process noise matrix
   StateMatrix Q_;
@@ -423,15 +428,15 @@ private:
 
   // Generate 2n+1 sigma points from current state.
   // Repairs state_.P in-place if it has lost positive-definiteness.
-  Eigen::MatrixXd generate_sigma_points();
+  SigmaMatrix generate_sigma_points();
 
   // Normalize angle to [-pi, pi]
   static double normalize_angle(double angle);
 
   // Normalize angle components of state vector
   static StateVector normalize_state(const StateVector& x);
-  static Eigen::Vector4d quaternion_mean_tangent(const Eigen::MatrixXd & sigma_pred,
-                                                 const Eigen::VectorXd & Wm,
+  static Eigen::Vector4d quaternion_mean_tangent(const SigmaMatrix & sigma_pred,
+                                                 const SigmaWeights & Wm,
                                                  int n_sigma);
 };
 
