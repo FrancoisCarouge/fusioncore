@@ -349,8 +349,10 @@ void UKF::predict(double dt) {
     // completely corrupting the covariance.
     StateVector diff = sigma_pred.col(i) - x_pred;
     if (params_.tangent_space_attitude) attitude_difference(diff, sigma_pred.col(i), x_pred);
-    P_pred += Wc_[i] * diff * diff.transpose();
+    // The sum is symmetric: its upper triangle alone, copied below once it is complete
+    P_pred.selfadjointView<Eigen::Upper>().rankUpdate(diff, Wc_[i]);
   }
+  P_pred.triangularView<Eigen::StrictlyLower>() = P_pred.transpose();
   if (params_.tangent_space_attitude) {
     // QW carries dq.w - 1, which is second order, so its variance collapses toward
     // zero and would make P singular in that direction. Floor it.
