@@ -35,8 +35,6 @@ void UKF::init(const State& initial_state) {
 
 void UKF::compute_weights() {
   int n_sigma = 2 * n_aug_ + 1;
-  Wm_.resize(n_sigma);
-  Wc_.resize(n_sigma);
   // alpha is 1.0 since 0.3.7 (commit 0da4ff0, 2026-08-13), which gives lambda = 0
   // and all 47 weights non-negative: the standard unscaled UKF. Do not lower it.
   //
@@ -151,9 +149,9 @@ static void apply_attitude_correction(fusioncore::StateVector& x,
   x[QW] = qn.w(); x[QX] = qn.x(); x[QY] = qn.y(); x[QZ] = qn.z();
 }
 
-Eigen::MatrixXd UKF::generate_sigma_points() {
+UKF::SigmaMatrix UKF::generate_sigma_points() {
   int n_sigma = 2 * n_aug_ + 1;
-  Eigen::MatrixXd sigma(STATE_DIM, n_sigma);
+  SigmaMatrix sigma;
   // Symmetrize P before factoring to eliminate floating-point asymmetry.
   state_.P = (state_.P + state_.P.transpose()) * 0.5;
 
@@ -296,9 +294,9 @@ Eigen::MatrixXd UKF::generate_sigma_points() {
 void UKF::predict(double dt) {
   if (!initialized_)
     throw std::runtime_error("FusionCore: predict() called before init()");
-  Eigen::MatrixXd sigma = generate_sigma_points();
+  const SigmaMatrix sigma = generate_sigma_points();
   int n_sigma = 2 * n_aug_ + 1;
-  Eigen::MatrixXd sigma_pred(STATE_DIM, n_sigma);
+  SigmaMatrix sigma_pred;
   for (int i = 0; i < n_sigma; ++i)
     sigma_pred.col(i) = motion_model_->predict(sigma.col(i), dt);
   // Quaternion sign consistency: q and -q represent the same rotation, but
@@ -377,10 +375,10 @@ Eigen::Matrix<double, z_dim, 1> UKF::update(
   using ZMatrix   = Eigen::Matrix<double, z_dim, z_dim>;
   using PxzMatrix = Eigen::Matrix<double, STATE_DIM, z_dim>;
 
-  Eigen::MatrixXd sigma = generate_sigma_points();
+  const SigmaMatrix sigma = generate_sigma_points();
   int n_sigma = 2 * n_aug_ + 1;
 
-  Eigen::Matrix<double, z_dim, Eigen::Dynamic> sigma_z(z_dim, n_sigma);
+  Eigen::Matrix<double, z_dim, kSigmaPoints> sigma_z;
   for (int i = 0; i < n_sigma; ++i)
     sigma_z.col(i) = h(sigma.col(i));
 
@@ -457,10 +455,10 @@ void UKF::predict_measurement(
   using ZVector = Eigen::Matrix<double, z_dim, 1>;
   using ZMatrix = Eigen::Matrix<double, z_dim, z_dim>;
 
-  Eigen::MatrixXd sigma = generate_sigma_points();
+  const SigmaMatrix sigma = generate_sigma_points();
   int n_sigma = 2 * n_aug_ + 1;
 
-  Eigen::Matrix<double, z_dim, Eigen::Dynamic> sigma_z(z_dim, n_sigma);
+  Eigen::Matrix<double, z_dim, kSigmaPoints> sigma_z;
   for (int i = 0; i < n_sigma; ++i)
     sigma_z.col(i) = h(sigma.col(i));
 
@@ -549,8 +547,8 @@ double UKF::normalize_angle(double angle) {
 // spread degrades the answer gradually instead of flipping it.
 //
 // Converges in 2-3 passes for any realistic spread; the cap is a guard, not a budget.
-Eigen::Vector4d UKF::quaternion_mean_tangent(const Eigen::MatrixXd & sigma_pred,
-                                             const Eigen::VectorXd & Wm,
+Eigen::Vector4d UKF::quaternion_mean_tangent(const SigmaMatrix & sigma_pred,
+                                             const SigmaWeights & Wm,
                                              int n_sigma) {
   Eigen::Quaterniond q_ref(sigma_pred(QW, 0), sigma_pred(QX, 0),
                            sigma_pred(QY, 0), sigma_pred(QZ, 0));
