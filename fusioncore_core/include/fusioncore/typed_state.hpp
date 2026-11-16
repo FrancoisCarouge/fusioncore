@@ -58,6 +58,7 @@ inline constexpr auto radian = mp_units::si::radian;
 using Length = Quantity<metre>;
 using Ratio = Quantity<mp_units::one>;
 using Angle = Quantity<radian>;
+using Time = Quantity<second>;
 using Speed = Quantity<metre / second>;
 using Acceleration = Quantity<metre / (second * second)>;
 // An angular rate, the angle a ratio: mp-units keeps the radian's kind apart,
@@ -74,6 +75,13 @@ using Vector = fcarouge::typed_column_vector<
 template <typename Type, typename Untyped>
 [[nodiscard]] Type element(const Untyped& x, int index) {
   return x[index] * Type::reference;
+}
+
+// Writes the quantity `value` into the state element at `index`, as its
+// numerical value in the unit of its type.
+template <typename Type, typename Untyped>
+void assign(Untyped& x, int index, Type value) {
+  x[index] = value.numerical_value_in(Type::unit);
 }
 
 // The numerical values of the typed column vector `value`, each in its unit.
