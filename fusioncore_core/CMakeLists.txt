@@ -17,6 +17,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(mp-units REQUIRED)
+find_package(fcarouge-typed-linear-algebra REQUIRED)
+find_package(fcarouge-sparse-linear-algebra REQUIRED)
 
 add_library(fusioncore_core STATIC
   src/ukf.cpp
@@ -29,7 +32,8 @@ target_include_directories(fusioncore_core PUBLIC
   $<INSTALL_INTERFACE:include/fusioncore_core>
 )
 
-target_link_libraries(fusioncore_core PUBLIC Eigen3::Eigen)
+target_link_libraries(fusioncore_core PUBLIC Eigen3::Eigen mp-units::mp-units
+  fcarouge-typed-linear-algebra::tlinalg fcarouge-sparse-linear-algebra::slinalg)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -129,7 +133,8 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_targets(fusioncore_core_targets HAS_LIBRARY_TARGET)
-ament_export_dependencies(eigen3_cmake_module Eigen3)
+ament_export_dependencies(eigen3_cmake_module Eigen3 mp-units fcarouge-typed-linear-algebra
+  fcarouge-sparse-linear-algebra)
 ament_export_include_directories(include/fusioncore_core)
 
 install(

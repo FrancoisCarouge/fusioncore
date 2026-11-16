@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fusioncore/state.hpp"
+#include "fusioncore/typed_state.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 
@@ -53,16 +54,14 @@ struct VslamPose {
 
 inline VslamPoseMeasurement vslam_pose_measurement_function(const StateVector& x)
 {
-  VslamPoseMeasurement z;
-  z[0] = x[X];
-  z[1] = x[Y];
-  z[2] = x[Z];
+  using namespace typed;
   double roll, pitch, yaw;
   quat_to_euler(x[QW], x[QX], x[QY], x[QZ], roll, pitch, yaw);
-  z[3] = roll;
-  z[4] = pitch;
-  z[5] = yaw;
-  return z;
+  // the position [m] and the roll, pitch, yaw [rad]
+  const Vector<Length, Length, Length, Angle, Angle, Angle> z{
+    element<Length>(x, X), element<Length>(x, Y), element<Length>(x, Z),
+    roll * radian, pitch * radian, yaw * radian};
+  return untyped(z);
 }
 
 // ─── Noise matrix ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fusioncore/state.hpp"
+#include "fusioncore/typed_state.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 
@@ -341,12 +342,14 @@ inline auto gnss_pos_measurement_function_with_lever_arm(
     double R[3][3];
     quat_to_rotation_matrix(qw, qx, qy, qz, R);
 
-    double lx = lever_arm.x, ly = lever_arm.y, lz = lever_arm.z;
-    GnssPosMeasurement z;
-    z[0] = x[X] + R[0][0]*lx + R[0][1]*ly + R[0][2]*lz;
-    z[1] = x[Y] + R[1][0]*lx + R[1][1]*ly + R[1][2]*lz;
-    z[2] = x[Z] + R[2][0]*lx + R[2][1]*ly + R[2][2]*lz;
-    return z;
+    using namespace typed;
+    const Length lx = lever_arm.x * metre, ly = lever_arm.y * metre, lz = lever_arm.z * metre;
+    // the antenna's position [m]: the base's plus its rotated lever arm
+    const Vector<Length, Length, Length> z{
+      element<Length>(x, X) + R[0][0]*lx + R[0][1]*ly + R[0][2]*lz,
+      element<Length>(x, Y) + R[1][0]*lx + R[1][1]*ly + R[1][2]*lz,
+      element<Length>(x, Z) + R[2][0]*lx + R[2][1]*ly + R[2][2]*lz};
+    return untyped(z);
   };
 }
 

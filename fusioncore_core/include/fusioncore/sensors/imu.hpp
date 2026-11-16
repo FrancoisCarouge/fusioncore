@@ -1,5 +1,6 @@
 #pragma once
 #include "fusioncore/state.hpp"
+#include "fusioncore/typed_state.hpp"
 #include <Eigen/Dense>
 #include <cmath>
 
@@ -53,16 +54,18 @@ struct ImuParams {
 // R^T row 2: [2(qx*qz - qw*qy), 2(qy*qz + qw*qx), 1 - 2(qx² + qy²)]
 // Yaw drops out because rotating around world-z does not change a z-aligned vector.
 inline ImuMeasurement imu_measurement_function(const StateVector& x) {
-  ImuMeasurement z;
-  constexpr double g = 9.80665;
+  using namespace typed;
+  const Acceleration g = 9.80665 * Acceleration::reference;
   const double qw = x[QW], qx = x[QX], qy = x[QY], qz = x[QZ];
-  z[0] = x[WX] + x[B_GX];
-  z[1] = x[WY] + x[B_GY];
-  z[2] = x[WZ] + x[B_GZ];
-  z[3] = x[AX] + x[B_AX] + 2*(qx*qz - qw*qy) * g;
-  z[4] = x[AY] + x[B_AY] + 2*(qy*qz + qw*qx) * g;
-  z[5] = x[AZ] + x[B_AZ] + (1 - 2*(qx*qx + qy*qy)) * g;
-  return z;
+  // the gyroscope [rad/s] and the accelerometer [m/s²]
+  const Vector<AngularSpeed, AngularSpeed, AngularSpeed, Acceleration, Acceleration, Acceleration> z{
+    element<AngularSpeed>(x, WX) + element<AngularSpeed>(x, B_GX),
+    element<AngularSpeed>(x, WY) + element<AngularSpeed>(x, B_GY),
+    element<AngularSpeed>(x, WZ) + element<AngularSpeed>(x, B_GZ),
+    element<Acceleration>(x, AX) + element<Acceleration>(x, B_AX) + 2*(qx*qz - qw*qy) * g,
+    element<Acceleration>(x, AY) + element<Acceleration>(x, B_AY) + 2*(qy*qz + qw*qx) * g,
+    element<Acceleration>(x, AZ) + element<Acceleration>(x, B_AZ) + (1 - 2*(qx*qx + qy*qy)) * g};
+  return untyped(z);
 }
 
 // h(x): state -> expected raw IMU measurement accounting for the lever arm
@@ -77,26 +80,30 @@ inline ImuMeasurement imu_measurement_function(const StateVector& x) {
 inline auto imu_measurement_function_with_lever_arm(const ImuLeverArm& lever_arm)
 {
   return [lever_arm](const StateVector& x) -> ImuMeasurement {
-    ImuMeasurement z;
-    constexpr double g = 9.80665;
+    using namespace typed;
+    const Acceleration g = 9.80665 * Acceleration::reference;
     const double qw = x[QW], qx = x[QX], qy = x[QY], qz = x[QZ];
-    const double wx = x[WX], wy = x[WY], wz = x[WZ];
-    const double rx = lever_arm.x, ry = lever_arm.y, rz = lever_arm.z;
+    const AngularSpeed wx = element<AngularSpeed>(x, WX);
+    const AngularSpeed wy = element<AngularSpeed>(x, WY);
+    const AngularSpeed wz = element<AngularSpeed>(x, WZ);
+    const Length rx = lever_arm.x * metre, ry = lever_arm.y * metre, rz = lever_arm.z * metre;
 
-    // Centripetal: ω × (ω × r)  in body frame
-    const double w_dot_r  = wx*rx + wy*ry + wz*rz;
-    const double w_dot_w  = wx*wx + wy*wy + wz*wz;
-    const double cen_x    = w_dot_r * wx - w_dot_w * rx;
-    const double cen_y    = w_dot_r * wy - w_dot_w * ry;
-    const double cen_z    = w_dot_r * wz - w_dot_w * rz;
+    // Centripetal: ω × (ω × r)  in body frame [m/s²]
+    const Speed w_dot_r = wx*rx + wy*ry + wz*rz;
+    const auto w_dot_w  = wx*wx + wy*wy + wz*wz;
+    const Acceleration cen_x = w_dot_r * wx - w_dot_w * rx;
+    const Acceleration cen_y = w_dot_r * wy - w_dot_w * ry;
+    const Acceleration cen_z = w_dot_r * wz - w_dot_w * rz;
 
-    z[0] = wx + x[B_GX];
-    z[1] = wy + x[B_GY];
-    z[2] = wz + x[B_GZ];
-    z[3] = x[AX] + x[B_AX] + 2*(qx*qz - qw*qy) * g + cen_x;
-    z[4] = x[AY] + x[B_AY] + 2*(qy*qz + qw*qx) * g + cen_y;
-    z[5] = x[AZ] + x[B_AZ] + (1 - 2*(qx*qx + qy*qy)) * g + cen_z;
-    return z;
+    // the gyroscope [rad/s] and the accelerometer [m/s²]
+    const Vector<AngularSpeed, AngularSpeed, AngularSpeed, Acceleration, Acceleration, Acceleration> z{
+      wx + element<AngularSpeed>(x, B_GX),
+      wy + element<AngularSpeed>(x, B_GY),
+      wz + element<AngularSpeed>(x, B_GZ),
+      element<Acceleration>(x, AX) + element<Acceleration>(x, B_AX) + 2*(qx*qz - qw*qy) * g + cen_x,
+      element<Acceleration>(x, AY) + element<Acceleration>(x, B_AY) + 2*(qy*qz + qw*qx) * g + cen_y,
+      element<Acceleration>(x, AZ) + element<Acceleration>(x, B_AZ) + (1 - 2*(qx*qx + qy*qy)) * g + cen_z};
+    return untyped(z);
   };
 }
 
