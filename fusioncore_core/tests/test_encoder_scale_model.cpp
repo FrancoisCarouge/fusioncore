@@ -55,7 +55,8 @@ Result drive(bool scale_model, double gyro_bias_dps, double enc_scale,
     for (int j : {QW, QX, QY, QZ})
       s.P(i, j) = (i == j) ? 1e-6 : 0.0;
   s.P(B_GZ, B_GZ)   = 0.175 * 0.175;
-  s.P(B_EWZ, B_EWZ) = scale_model ? 0.30 * 0.30 : 0.175 * 0.175;
+  s.P(B_EWZ, B_EWZ) = 0.175 * 0.175;
+  s.P(S_EWZ, S_EWZ) = 0.30 * 0.30;
   fc.init(s, 0.0);
 
   double t = 0.0, true_yaw = 0.0;
@@ -72,7 +73,7 @@ Result drive(bool scale_model, double gyro_bias_dps, double enc_scale,
   while (yaw - true_yaw >  M_PI) yaw -= 2 * M_PI;
   while (true_yaw - yaw >  M_PI) yaw += 2 * M_PI;
   const auto& x = fc.get_state().x;
-  return {(yaw - true_yaw) * 180.0 / M_PI, x[B_GZ], x[B_EWZ]};
+  return {(yaw - true_yaw) * 180.0 / M_PI, x[B_GZ], x[S_EWZ]};
 }
 
 }  // namespace
@@ -160,6 +161,62 @@ TEST(EncoderScaleModel, SlipDoesNotMoveTheScaleWhenTheGateIsOn)
   EXPECT_NEAR(with_slip, 0.297, 0.03);
 }
 
+// The bias [rad/s] and the scale [1] are two elements: each model reads its own
+// and leaves the other where its prior put it, whatever the encoder reads.
+TEST(EncoderScaleModel, EachModelReadsOnlyItsOwnElement)
+{
+  StateVector x = StateVector::Zero();
+  x[WZ] = 0.4;
+  x[B_EWZ] = 0.03;
+  x[S_EWZ] = 0.25;
+  EXPECT_DOUBLE_EQ(sensors::encoder_scale_measurement_function(x)[2], 1.25 * 0.4)
+      << "the scale model reads (1 + S_EWZ) * WZ, not the bias";
+  EXPECT_DOUBLE_EQ(sensors::encoder_measurement_function(x)[2], 0.4 + 0.03)
+      << "the bias model reads WZ + B_EWZ, not the scale";
+
+  for (const bool scale_model : {false, true}) {
+    FusionCoreConfig cfg;
+    cfg.adaptive_gnss = false;
+    cfg.gps_track_heading_enabled = false;
+    cfg.encoder_yaw_scale_model = scale_model;
+    FusionCore fc(cfg);
+    State s;
+    s.P = StateMatrix::Identity() * 0.1;
+    for (int i : {QW, QX, QY, QZ})
+      for (int j : {QW, QX, QY, QZ})
+        s.P(i, j) = (i == j) ? 1e-6 : 0.0;
+    s.P(B_EWZ, B_EWZ) = 0.175 * 0.175;
+    s.P(S_EWZ, S_EWZ) = 0.30 * 0.30;
+    fc.init(s, 0.0);
+    for (int i = 1; i <= 1000; ++i) {
+      const double t = i * 0.01, w = ((i / 300) % 2) ? 0.6 : 0.0;
+      fc.update_imu(t, 0.0, 0.0, w, 0.0, 0.0, 9.80665);
+      fc.update_encoder(t, 1.0, 0.0, w * 1.2 + 0.05, 1e-4, 1e-4, 1e-4);
+    }
+    const auto& st = fc.get_state();
+    const int unused = scale_model ? B_EWZ : S_EWZ;
+    const int used = scale_model ? S_EWZ : B_EWZ;
+    EXPECT_NEAR(st.x[unused], 0.0, 1e-9) << "the element of the other model must not move";
+    EXPECT_GT(std::abs(st.x[used]), 0.01) << "the selected model's element must move";
+    for (int i = 0; i < STATE_DIM; ++i)
+      if (i != unused)
+        EXPECT_NEAR(st.P(unused, i), 0.0, 1e-9)
+            << "the element of the other model must stay uncorrelated with " << i;
+  }
+}
+
+// The reading the ROS node substitutes for an ignored yaw channel leaves no
+// innovation under either model.
+TEST(EncoderScaleModel, TheExpectedYawReadingFollowsTheModel)
+{
+  StateVector x = StateVector::Zero();
+  x[WZ] = 0.4;
+  x[B_EWZ] = 0.03;
+  x[S_EWZ] = 0.25;
+  EXPECT_DOUBLE_EQ(sensors::expected_encoder_wz(x, false), sensors::encoder_measurement_function(x)[2]);
+  EXPECT_DOUBLE_EQ(sensors::expected_encoder_wz(x, true), sensors::encoder_scale_measurement_function(x)[2]);
+}
+
 TEST(EncoderScaleModel, TheAdditiveModelRemainsTheDefault)
 {
   FusionCoreConfig cfg;
@@ -237,7 +294,7 @@ TEST(EncoderScaleModel, CharacteriseThatKaistMotionStatisticsDoNotExplainTheFail
       for (int j : {QW, QX, QY, QZ})
         s.P(i, j) = (i == j) ? 1e-6 : 0.0;
     s.P(B_GZ, B_GZ) = 0.175 * 0.175;
-    s.P(B_EWZ, B_EWZ) = 0.30 * 0.30;
+    s.P(S_EWZ, S_EWZ) = 0.30 * 0.30;
     fc.init(s, 0.0);
     const double dt = 0.01;
     const int period = static_cast<int>(20.0 / dt);
@@ -249,7 +306,7 @@ TEST(EncoderScaleModel, CharacteriseThatKaistMotionStatisticsDoNotExplainTheFail
       fc.update_imu(t, 0.0, 0.0, wz, 0.0, 0.0, 9.80665);
       fc.update_encoder(t, 5.0, 0.0, wz * (1.0 + true_scale), 1e-4, 1e-4, 1e-4);
     }
-    return fc.get_state().x[B_EWZ];
+    return fc.get_state().x[S_EWZ];
   };
 
   // KAIST's statistics: 4.7% of samples turning, p95 yaw rate 0.057 rad/s.

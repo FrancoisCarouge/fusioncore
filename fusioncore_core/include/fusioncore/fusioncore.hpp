@@ -132,7 +132,7 @@ struct FusionCoreConfig {
   // ---- how encoder yaw-rate error is modelled ----
   //
   // false (default): z_wz = WZ + B_EWZ, an additive bias.
-  // true:            z_wz = (1 + B_EWZ) * WZ, a multiplicative scale.
+  // true:            z_wz = (1 + S_EWZ) * WZ, a multiplicative scale.
   //
   // An encoder has no constant additive yaw-rate offset. Its errors are scale (track
   // width), speed-proportional (wheel radius) and slip. Modelling scale as a bias
@@ -143,9 +143,9 @@ struct FusionCoreConfig {
   // the scale is, so every straight stretch is a known zero for WZ and the gyro's
   // reading there is its bias. No stop required.
   //
-  // OFF BY DEFAULT until it is measured on real data. When on, B_EWZ is a
-  // DIMENSIONLESS scale error, not a rad/s bias, and encoder_wz_scale_initial_sigma
-  // applies instead of gyro_bias_initial_sigma.
+  // OFF BY DEFAULT until it is measured on real data. When on, the filter observes
+  // the DIMENSIONLESS scale error S_EWZ, not the rad/s bias B_EWZ, whose prior is
+  // encoder_wz_scale_initial_sigma.
   bool   encoder_yaw_scale_model = false;
   double encoder_wz_scale_initial_sigma = 0.30;   // dimensionless, 30%
 

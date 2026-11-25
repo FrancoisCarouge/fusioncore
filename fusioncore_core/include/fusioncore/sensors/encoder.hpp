@@ -50,16 +50,12 @@ struct EncoderParams {
 // With the additive model the same straight stretch gives WZ = -b_ewz, which pins
 // nothing. That is the whole difference.
 //
-// When this model is selected, B_EWZ holds a DIMENSIONLESS scale error, not a rad/s
-// bias. 0.297 means the encoder over-reports rotation by 29.7%, which is the value
+// This model reads the DIMENSIONLESS scale error S_EWZ, and leaves the rad/s bias
+// B_EWZ unobserved. 0.297 means the encoder over-reports rotation by 29.7%, which is the value
 // measured on NCLT.
 inline EncoderMeasurement encoder_scale_measurement_function(const StateVector& x) {
   using namespace typed;
-  // B_EWZ is the encoder's yaw rate bias [rad/s] (state.hpp); this model reads
-  // its numerical value as a dimensionless scale factor instead: one state
-  // element, two quantities depending on encoder_yaw_scale_model (Q13).
-  const Ratio scale_error =
-    element<AngularSpeed>(x, B_EWZ).numerical_value_in(AngularSpeed::unit) * mp_units::one;
+  const Ratio scale_error = element<Ratio>(x, S_EWZ);
   const Vector<Speed, Speed, AngularSpeed> z{
     element<Speed>(x, VX),
     element<Speed>(x, VY),
@@ -74,6 +70,14 @@ inline EncoderMeasurement encoder_measurement_function(const StateVector& x) {
     element<Speed>(x, VY),                                        // lateral velocity
     element<AngularSpeed>(x, WZ) + element<AngularSpeed>(x, B_EWZ)};  // encoder WZ reading = body WZ + encoder WZ bias
   return untyped(z);
+}
+
+// The encoder yaw rate reading the selected model expects of state x, the one
+// whose innovation is zero: WZ + B_EWZ of the bias model, (1 + S_EWZ) * WZ of
+// the scale model (FusionCoreConfig::encoder_yaw_scale_model).
+inline double expected_encoder_wz(const StateVector& x, bool scale_model) {
+  return (scale_model ? encoder_scale_measurement_function(x)
+                      : encoder_measurement_function(x))[2];
 }
 
 // h(x): maps state vector to true body velocities (no encoder bias terms).

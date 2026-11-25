@@ -1,5 +1,6 @@
 #include <tuple>
 #include <atomic>
+#include <vector>
 #include "fusioncore/fusioncore.hpp"
 #include "fusioncore/motion_model.hpp"
 #include "fusioncore/sensors/gnss.hpp"
@@ -154,6 +155,7 @@ public:
       {"ukf.q_accel_bias",                0.0,    1.0e-5},
       {"ukf.q_gyro_bias",                 0.0,    1.0e-5},
       {"ukf.q_encoder_wz_bias",           0.0,    1.0e-7},
+      {"ukf.q_encoder_wz_scale",          0.0,    1.0e-7},
       {"imu.gyro_bias_initial_sigma",     1.0e-6, 0.175 },
       {"imu.accel_bias_initial_sigma",    1.0e-6, 0.30  },
       {"encoder.wz_scale_initial_sigma",  1.0e-6, 0.30  },
@@ -736,6 +738,7 @@ public:
     declare_parameter("ukf.q_gyro_bias",         1e-5);
     declare_parameter("ukf.q_accel_bias",        1e-5);
     declare_parameter("ukf.q_encoder_wz_bias",   1e-7);
+    declare_parameter("ukf.q_encoder_wz_scale",  1e-7);
     declare_parameter("ukf.max_sigma_rotation_deg", 0.0);
     declare_parameter("ukf.max_sigma_rotation_relax_s", 0.0);
 
@@ -1088,6 +1091,7 @@ public:
     config.ukf.q_gyro_bias          = get_parameter("ukf.q_gyro_bias").as_double();
     config.ukf.q_accel_bias         = get_parameter("ukf.q_accel_bias").as_double();
     config.ukf.q_encoder_wz_bias    = get_parameter("ukf.q_encoder_wz_bias").as_double();
+    config.ukf.q_encoder_wz_scale   = get_parameter("ukf.q_encoder_wz_scale").as_double();
     config.ukf.max_sigma_rotation_deg =
       get_parameter("ukf.max_sigma_rotation_deg").as_double();
     config.ukf.max_sigma_rotation_relax_s =
@@ -1622,19 +1626,28 @@ public:
         fusioncore::State restored;
         double t = 0.0;
         std::string line;
+        // A checkpoint of another state size, one saved before the state grew, would
+        // load misaligned: count its values and reject it instead.
+        std::vector<double> xs, ps;
         while (std::getline(f, line)) {
           if (line.substr(0, 2) == "t=") {
             t = std::stod(line.substr(2));
-          } else if (line.substr(0, 2) == "x=") {
+          } else if (line.substr(0, 2) == "x=" || line.substr(0, 2) == "P=") {
+            auto& values = line[0] == 'x' ? xs : ps;
             std::istringstream ss(line.substr(2));
-            for (int i = 0; i < fusioncore::STATE_DIM; ++i) ss >> restored.x[i];
-          } else if (line.substr(0, 2) == "P=") {
-            std::istringstream ss(line.substr(2));
-            for (int r = 0; r < fusioncore::STATE_DIM; ++r)
-              for (int c = 0; c < fusioncore::STATE_DIM; ++c)
-                ss >> restored.P(r, c);
+            for (double v; ss >> v;) values.push_back(v);
           }
         }
+        constexpr std::size_t n = fusioncore::STATE_DIM;
+        if (xs.size() != n || ps.size() != n * n) {
+          response->success = false;
+          response->message = "Not a " + std::to_string(n) + "-state checkpoint: " + checkpoint_path_;
+          return;
+        }
+        for (std::size_t i = 0; i < n; ++i) restored.x[i] = xs[i];
+        for (std::size_t r = 0; r < n; ++r)
+          for (std::size_t c = 0; c < n; ++c)
+            restored.P(r, c) = ps[r * n + c];
         fc_->init(restored, t);
         response->success = true;
         response->message = "Loaded from " + checkpoint_path_;
@@ -2450,7 +2463,7 @@ private:
     // may well be rotating.
     //
     // Note the bias term on wz. encoder_measurement_function is
-    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ
+    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ  (scale model: (1 + S_EWZ) * WZ)
     // so predicting the yaw channel means adding the encoder WZ bias the filter
     // is currently estimating. Substituting bare WZ would leave an innovation of
     // -B_EWZ rather than zero: tiny once the variance is 1e12, but not zero, and
@@ -2461,7 +2474,8 @@ private:
       if (!enc2_use_vx_) { vx = st[fusioncore::VX]; var_vx = kIgnored; }
       if (!enc2_use_vy_) { vy = st[fusioncore::VY]; var_vy = kIgnored; }
       if (!enc2_use_wz_) {
-        wz = st[fusioncore::WZ] + st[fusioncore::B_EWZ];
+        wz = fusioncore::sensors::expected_encoder_wz(
+          st, get_parameter("encoder.yaw_scale_model").as_bool());
         var_wz = kIgnored;
       }
     }
@@ -2603,11 +2617,12 @@ private:
     // Substituting what the measurement function would PREDICT makes the
     // innovation exactly zero, so the channel cannot pull at all. Note the bias
     // term: encoder_measurement_function is
-    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ
+    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ  (scale model: (1 + S_EWZ) * WZ)
     // so predicting the yaw channel means adding the encoder yaw bias the filter
     // is currently estimating. Bare WZ would leave an innovation of -B_EWZ.
     const auto & st_pred = fc_->get_state().x;
-    const double wz_predicted = st_pred[fusioncore::WZ] + st_pred[fusioncore::B_EWZ];
+    const double wz_predicted = fusioncore::sensors::expected_encoder_wz(
+      st_pred, get_parameter("encoder.yaw_scale_model").as_bool());
     fc_->update_encoder(t, vx, vy, wz_predicted, var_vx, var_vy, 1e12);
   }
 
@@ -2650,11 +2665,12 @@ private:
     // Substituting what the measurement function would PREDICT makes the
     // innovation exactly zero, so the channel cannot pull at all. Note the bias
     // term: encoder_measurement_function is
-    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ
+    //   z[0] = VX,  z[1] = VY,  z[2] = WZ + B_EWZ  (scale model: (1 + S_EWZ) * WZ)
     // so predicting the yaw channel means adding the encoder yaw bias the filter
     // is currently estimating. Bare WZ would leave an innovation of -B_EWZ.
     const auto & st_pred = fc_->get_state().x;
-    const double wz_predicted = st_pred[fusioncore::WZ] + st_pred[fusioncore::B_EWZ];
+    const double wz_predicted = fusioncore::sensors::expected_encoder_wz(
+      st_pred, get_parameter("encoder.yaw_scale_model").as_bool());
     fc_->update_encoder(t, vx, vy, wz_predicted, var_vx, var_vy, 1e12);
   }
 
@@ -2995,9 +3011,10 @@ private:
     P(fusioncore::B_AX, fusioncore::B_AX) = a * a;
     P(fusioncore::B_AY, fusioncore::B_AY) = a * a;
     P(fusioncore::B_AZ, fusioncore::B_AZ) = a * a;
-    const double e = get_parameter("encoder.yaw_scale_model").as_bool()
-                   ? bias_enc_scale_sigma_ : g;
-    P(fusioncore::B_EWZ, fusioncore::B_EWZ) = e * e;
+    // Both encoder yaw error models have their own element: the model not selected
+    // never observes its element, which keeps this prior.
+    P(fusioncore::B_EWZ, fusioncore::B_EWZ) = g * g;
+    P(fusioncore::S_EWZ, fusioncore::S_EWZ) = bias_enc_scale_sigma_ * bias_enc_scale_sigma_;
   }
 
   void announce_observability(const fusioncore::FusionCoreStatus& st)

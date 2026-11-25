@@ -256,6 +256,7 @@ struct UKFParams {
   double q_gyro_bias         = 1e-5;   // (rad/s)²/step -- biases change slowly
   double q_accel_bias        = 1e-5;   // (m/s²)²/step
   double q_encoder_wz_bias   = 1e-7;   // (rad/s)²/step -- encoder WZ bias; mechanical, very stable
+  double q_encoder_wz_scale  = 1e-7;   // 1/step -- encoder WZ scale error (dimensionless); mechanical, very stable
 };
 
 class UKF {

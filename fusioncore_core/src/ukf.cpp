@@ -75,7 +75,8 @@ void UKF::build_process_noise() {
                    params_.q_acceleration, params_.q_acceleration, params_.q_acceleration,
                    params_.q_gyro_bias, params_.q_gyro_bias, params_.q_gyro_bias,
                    params_.q_accel_bias, params_.q_accel_bias, params_.q_accel_bias,
-                   params_.q_encoder_wz_bias;
+                   params_.q_encoder_wz_bias,
+                   params_.q_encoder_wz_scale;
 }
 
 

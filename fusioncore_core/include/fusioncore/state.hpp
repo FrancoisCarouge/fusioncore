@@ -5,7 +5,7 @@
 
 namespace fusioncore {
 
-// Full 23-dimensional state vector:
+// Full 24-dimensional state vector:
 // [x, y, z,                    -- position (meters, ENU frame)
 //  qw, qx, qy, qz,            -- orientation (unit quaternion, body-to-world)
 //  vx, vy, vz,                 -- linear velocity (m/s, body frame)
@@ -13,7 +13,8 @@ namespace fusioncore {
 //  ax, ay, az,                 -- linear acceleration (m/s², body frame)
 //  b_gx, b_gy, b_gz,           -- gyroscope bias (rad/s)
 //  b_ax, b_ay, b_az,           -- accelerometer bias (m/s²)
-//  b_ewz]                      -- encoder angular velocity Z bias (rad/s)
+//  b_ewz,                      -- encoder angular velocity Z bias (rad/s)
+//  s_ewz]                      -- encoder angular velocity Z scale error (dimensionless)
 //
 // Quaternion convention: q = [qw, qx, qy, qz], |q| = 1.
 // Rotation: v_world = R(q) * v_body.
@@ -24,8 +25,15 @@ namespace fusioncore {
 // encoder WZ bias -> integrated into heading -> observed via GPS bearing.
 // During GPS blackouts, the filter subtracts this estimated bias instead of
 // accumulating it as heading error. Mirrors exactly how B_GZ is handled for IMU.
+//
+// S_EWZ is the encoder's WZ scale error, the alternative model of the same
+// encoder error (FusionCoreConfig::encoder_yaw_scale_model): the encoder reads
+// (1 + S_EWZ) * WZ. Each model observes its own element only; the other keeps
+// its prior and never moves the rest of the state. The two were one element,
+// a bias in rad/s or a scale factor depending on the model: one element, two
+// units, its covariance, process noise and prior in either.
 
-constexpr int STATE_DIM = 23;
+constexpr int STATE_DIM = 24;
 
 // State indices: use these everywhere, never raw numbers
 enum StateIndex {
@@ -36,7 +44,8 @@ enum StateIndex {
   AX = 13, AY = 14, AZ = 15,
   B_GX = 16, B_GY = 17, B_GZ = 18,
   B_AX = 19, B_AY = 20, B_AZ = 21,
-  B_EWZ = 22  // encoder WZ bias: estimated from GPS heading, subtracted during blackouts
+  B_EWZ = 22, // encoder WZ bias: estimated from GPS heading, subtracted during blackouts
+  S_EWZ = 23  // encoder WZ scale error, of the scale model (encoder_yaw_scale_model)
 };
 
 using StateVector = Eigen::Matrix<double, STATE_DIM, 1>;
@@ -106,6 +115,7 @@ struct State {
   double accel_bias_y()      const { return x[B_AY]; }
   double accel_bias_z()      const { return x[B_AZ]; }
   double encoder_wz_bias()   const { return x[B_EWZ]; }
+  double encoder_wz_scale()  const { return x[S_EWZ]; }
 
   // Euler angles derived from quaternion (for display/logging only)
   double roll()  const { double r, p, y; quat_to_euler(x[QW],x[QX],x[QY],x[QZ],r,p,y); return r; }

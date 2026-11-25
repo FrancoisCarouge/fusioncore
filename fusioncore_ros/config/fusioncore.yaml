@@ -353,6 +353,7 @@ fusioncore:
     ukf.q_gyro_bias:      1.0e-5  # (rad/s)²/step: gyro bias drift (slow MEMS changes)
     ukf.q_accel_bias:     1.0e-5  # (m/s²)²/step: accel bias drift
     ukf.q_encoder_wz_bias: 1.0e-7 # (rad/s)²/step: encoder WZ bias drift (mechanical: very slow)
+    ukf.q_encoder_wz_scale: 1.0e-7 # 1/step: encoder WZ scale error drift, of encoder.yaw_scale_model (mechanical: very slow)
 
     # ── Motion model ──────────────────────────────────────────────────────────
     # Controls how sigma points are propagated during the predict step.
